@@ -24,6 +24,8 @@
           # zig
           zls
           zig
+          libxkbcommon
+          libinput
 
           # nix
           nixd

@@ -2,15 +2,20 @@ help:
     @just --list
 
 clean:
-    rm -r loggers/wayland/.zig-cache loggers/wayland/zig-out
+    rm -rf loggers/evdev_logger/.zig-cache loggers/evdev_logger/zig-out
+
+test-zig:
+    cd loggers/evdev_logger && zig build test
+
+test: test-zig
 
 build-zig:
-    cd loggers/wayland && zig build
+    cd loggers/evdev_logger && zig build
 
 build-all: build-zig
 
-run-logger-wayland:
-    cd loggers/wayland && zig build run
+run-evdev-logger:
+    cd loggers/evdev_logger && zig build run
 
 # Get the current system (e.g., "x86_64-linux", "aarch64-linux")
 
