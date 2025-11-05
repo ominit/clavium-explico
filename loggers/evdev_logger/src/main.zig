@@ -2,31 +2,63 @@ const std = @import("std");
 const evdev_logger = @import("evdev_logger");
 const xkb = @cImport({
     @cInclude("xkbcommon/xkbcommon.h");
-    @cInclude("stdio.h");
 });
 const input = @cImport({
     @cInclude("linux/input.h");
 });
+const LONG_BIT = @sizeOf(c_ulong) * 8;
 
-fn open_keyboard() []std.os.linux.pollfd {
-    const fd = std.os.linux.open("/dev/input/event3", .{ .ACCMODE = .RDONLY, .NONBLOCK = true }, 0);
-    const pollfd: std.os.linux.pollfd = .{
-        .fd = @intCast(fd),
-        .events = std.os.linux.POLL.IN,
-        .revents = 0,
-    };
-    defer _ = std.os.linux.close(pollfd.fd);
+const Keyboard = struct { path: *c_char, fd: c_int, state: *xkb.xkb_state, next: *Keyboard };
 
-    var pollfds = [_]std.os.linux.pollfd{pollfd};
-    return pollfds[0..];
-    // var pollfd: std.os.linux.pollfd = undefined;
-    // pollfd.fd = std.math.cast(i32, std.os.linux.open("/dev/input/event3", .{ .NONBLOCK = true, .ACCMODE = .RDONLY }, 0)).?;
-    // defer _ = std.os.linux.close(pollfd[0].fd);
-    // const pollfds = [*]std.os.linux.pollfd{pollfd};
-    // return pollfds;
+fn is_keyboard(fd: c_int) bool {
+    var errno = undefined;
+    const evbits = [(((input.EV_CNT) + LONG_BIT - 1) / LONG_BIT)]c_ulong{0};
+    const keybits = [(((input.KEY_CNT) + LONG_BIT - 1) / LONG_BIT)]c_ulong{0};
+
+    errno = input.ioctl(fd, input.EVIOCGBIT(0, evbits.len), evbits);
+    if (errno) return false;
+
+    if (!evdev_bit_is_set(evbits, input.EV_KEY))
+        return false;
+
+    errno = input.ioctl(fd, input.EVIOCGBIT(input.EV_KEY, @sizeOf(keybits)), keybits);
+    if (errno) return false;
+
+    for (input.KEY_RESERVED..input.KEY_MIN_INTERESTING + 1) |i| if (evdev_bit_is_set(keybits, i)) return true;
+
+    return false;
 }
 
-fn read_keycode(allocator: std.mem.Allocator, keycode: u32) !void {
+fn evdev_bit_is_set(array: *const []c_ulong, bit: c_int) bool {
+    const oneULL: c_ulonglong = comptime 1;
+    return array[bit / LONG_BIT] & (oneULL << (bit % LONG_BIT));
+}
+
+fn keyboard_new(entry: *input.dirent, keymap: *xkb.xkb_keymap, state: *xkb.xkb_state, out: **Keyboard) c_int {
+    _ = entry;
+    _ = keymap;
+    _ = state;
+    _ = out;
+}
+
+fn get_keyboards(keymap: *xkb.xkb_keymap, state: *xkb.xkb_state) !?*Keyboard {
+    _ = keymap;
+    _ = state;
+    const keyboards: *Keyboard = undefined;
+    const keyboard: *Keyboard = undefined;
+    var dir = try std.fs.openDirAbsolute("/dev/input", .{ .iterate = true });
+    defer dir.close();
+
+    var iter = dir.iterate();
+    while (try iter.next()) |entry| {
+        _ = entry;
+    }
+    _ = keyboard;
+
+    return keyboards;
+}
+
+pub fn main() !void {
     const context = xkb.xkb_context_new(xkb.XKB_CONTEXT_NO_FLAGS);
     if (context == null) {
         std.log.err("Failed to create xkbcommon context", .{});
@@ -54,42 +86,6 @@ fn read_keycode(allocator: std.mem.Allocator, keycode: u32) !void {
     }
     defer xkb.xkb_state_unref(state);
 
-    const keysym = xkb.xkb_state_key_get_one_sym(state, keycode);
-    const keysym_name_size = std.math.cast(usize, xkb.xkb_keysym_get_name(keysym, null, 0) + 1).?;
-    const keysym_name = try allocator.alloc(u8, keysym_name_size);
-    defer allocator.free(keysym_name);
-    _ = std.math.cast(usize, xkb.xkb_keysym_get_name(keysym, keysym_name.ptr, keysym_name.len) + 1).?;
-    std.debug.print("`{s}`\n", .{keysym_name});
-    const utf8_size = std.math.cast(usize, xkb.xkb_state_key_get_utf8(state, keycode, null, 0) + 1).?;
-    const buffer = try allocator.alloc(u8, utf8_size);
-    defer allocator.free(buffer);
-    _ = xkb.xkb_state_key_get_utf8(state, keycode, buffer.ptr, buffer.len);
-    std.debug.print("`{s}`\n", .{buffer});
-}
-
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    const pollfd = open_keyboard();
-
-    var i: usize = 0;
-    while (true) {
-        const ret = std.os.linux.poll(pollfd.ptr, pollfd.len, -1);
-        if (ret <= 0) continue;
-        const buf: []u8 align(@alignOf(input.input_event)) = try allocator.alloc(u8, @sizeOf(input.input_event));
-        defer allocator.free(buf);
-        std.debug.print("hi - {any}\n", .{input.KEY_T});
-        const r = std.os.linux.read(pollfd[0].fd, buf.ptr, @sizeOf(input.input_event));
-        if (r < 0) {
-            std.log.debug("error, r is less than 0, r = {d}", .{r});
-            break;
-        }
-        const input_event: *input.input_event = @ptrCast(@alignCast(buf));
-        std.debug.print("{any}\n", .{input_event});
-
-        try read_keycode(allocator, input_event.code);
-        i += 1;
-    }
+    const keyboards = try get_keyboards(keymap.?, state.?);
+    _ = keyboards;
 }
