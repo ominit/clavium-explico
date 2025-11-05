@@ -4,68 +4,29 @@ const xkb = @cImport({
     @cInclude("xkbcommon/xkbcommon.h");
     @cInclude("stdio.h");
 });
-const evdev = @cImport({
+const input = @cImport({
     @cInclude("linux/input.h");
 });
 
-fn open_keyboard() !void {
-    const dir = try std.fs.openDirAbsolute("/dev/input", .{ .iterate = true });
+fn open_keyboard() []std.os.linux.pollfd {
+    const fd = std.os.linux.open("/dev/input/event3", .{ .ACCMODE = .RDONLY, .NONBLOCK = true }, 0);
+    const pollfd: std.os.linux.pollfd = .{
+        .fd = @intCast(fd),
+        .events = std.os.linux.POLL.IN,
+        .revents = 0,
+    };
+    defer _ = std.os.linux.close(pollfd.fd);
 
-    var entry_it = dir.iterate();
-    while (try entry_it.next()) |entry| {
-        if (!std.mem.startsWith(u8, entry.name, "event")) {
-            continue; // Skip non-event files
-        }
-
-        const buf: []u8 = undefined;
-        const device_path_fmt_buf = try std.fmt.bufPrint(buf, "/dev/input/{s}", .{entry.name});
-        const device_path_buf: [*:0]const u8 = @ptrCast(device_path_fmt_buf.ptr);
-
-        // Try to open the device in read-only and non-blocking mode.
-        // O_RDWR might be needed for some ioctls or if you wanted to send events.
-        const fd = std.math.cast(i32, std.os.linux.open(device_path_buf, .{}, 0)).?;
-
-        // Check if it's an input device (EVIOCGNAME) and supports EV_KEY events.
-        var name_buf: [256]u8 = undefined;
-        const res_name_len = std.os.linux.ioctl(fd, evdev.EVIOCGNAME(256), name_buf.len);
-        if (res_name_len == -1) {
-            // Not a device with a name, or error.
-            std.os.close(fd);
-            continue;
-        }
-        const device_name_slice = name_buf[0..@intCast(res_name_len)];
-
-        // Check if it supports EV_KEY events
-        // evdev.NBITS(evdev.EV_MAX) is a macro, need to figure out its value or a safe upper bound
-        // A common way to get capability bits is to query for EV_MAX bits.
-        // `BIT_WORD(EV_MAX)` from C's `input.h`
-        // var ev_bits_storage: [evdev.NBITS(evdev.EV_MAX)]u8 = undefined;
-        // const res_evbits = std.os.linux.ioctl(fd, evdev.EVIOCGBIT(0, evdev.EV_MAX), @ptrCast(&ev_bits_storage));
-        // if (res_evbits == -1) {
-        //     std.os.close(fd);
-        //     continue;
-        // }
-
-        // Check if EV_KEY bit is set, indicating it generates key events
-        // if (!test_bit(evdev.EV_KEY, &ev_bits_storage)) {
-        //     std.os.close(fd);
-        //     continue;
-        // }
-
-        std.debug.print("Found keyboard device: {s} ('{s}')\n", .{ device_path_buf, device_name_slice });
-        // return fd;
-    }
-
-    return error.NoKeyboardDeviceFound;
+    var pollfds = [_]std.os.linux.pollfd{pollfd};
+    return pollfds[0..];
+    // var pollfd: std.os.linux.pollfd = undefined;
+    // pollfd.fd = std.math.cast(i32, std.os.linux.open("/dev/input/event3", .{ .NONBLOCK = true, .ACCMODE = .RDONLY }, 0)).?;
+    // defer _ = std.os.linux.close(pollfd[0].fd);
+    // const pollfds = [*]std.os.linux.pollfd{pollfd};
+    // return pollfds;
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit(); // Clean up GPA on exit
-    const allocator = gpa.allocator();
-
-    try open_keyboard();
-
+fn read_keycode(allocator: std.mem.Allocator, keycode: u32) !void {
     const context = xkb.xkb_context_new(xkb.XKB_CONTEXT_NO_FLAGS);
     if (context == null) {
         std.log.err("Failed to create xkbcommon context", .{});
@@ -93,7 +54,6 @@ pub fn main() !void {
     }
     defer xkb.xkb_state_unref(state);
 
-    const keycode = 200;
     const keysym = xkb.xkb_state_key_get_one_sym(state, keycode);
     const keysym_name_size = std.math.cast(usize, xkb.xkb_keysym_get_name(keysym, null, 0) + 1).?;
     const keysym_name = try allocator.alloc(u8, keysym_name_size);
@@ -104,24 +64,32 @@ pub fn main() !void {
     const buffer = try allocator.alloc(u8, utf8_size);
     defer allocator.free(buffer);
     _ = xkb.xkb_state_key_get_utf8(state, keycode, buffer.ptr, buffer.len);
-    std.debug.print("`{s}`", .{buffer});
+    std.debug.print("`{s}`\n", .{buffer});
 }
 
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
+    const pollfd = open_keyboard();
+
+    var i: usize = 0;
+    while (true) {
+        const ret = std.os.linux.poll(pollfd.ptr, pollfd.len, -1);
+        if (ret <= 0) continue;
+        const buf: []u8 align(@alignOf(input.input_event)) = try allocator.alloc(u8, @sizeOf(input.input_event));
+        defer allocator.free(buf);
+        std.debug.print("hi - {any}\n", .{input.KEY_T});
+        const r = std.os.linux.read(pollfd[0].fd, buf.ptr, @sizeOf(input.input_event));
+        if (r < 0) {
+            std.log.debug("error, r is less than 0, r = {d}", .{r});
+            break;
         }
-    };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+        const input_event: *input.input_event = @ptrCast(@alignCast(buf));
+        std.debug.print("{any}\n", .{input_event});
+
+        try read_keycode(allocator, input_event.code);
+        i += 1;
+    }
 }
