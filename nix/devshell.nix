@@ -26,6 +26,7 @@
           zig
           libxkbcommon
           libinput
+          valgrind
 
           # nix
           nixd

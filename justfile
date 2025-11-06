@@ -5,7 +5,7 @@ clean:
     rm -rf loggers/evdev_logger/.zig-cache loggers/evdev_logger/zig-out
 
 test-zig:
-    cd loggers/evdev_logger && zig build test
+    cd loggers/evdev_logger && zig build test -Doptimize=ReleaseSafe
 
 test: test-zig
 
