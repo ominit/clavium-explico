@@ -7,6 +7,7 @@ const input = @cImport({
     @cInclude("linux/input.h");
 });
 const LONG_BIT = @sizeOf(c_ulong) * 8;
+const EVDEV_OFFSET = 8;
 
 const Keyboard = struct { path: []u8, fd: c_int, state: *xkb.xkb_state, next: ?*Keyboard };
 
@@ -112,16 +113,57 @@ fn free_keyboards(allocator: std.mem.Allocator, keyboards: ?*Keyboard) void {
     }
 }
 
-fn loop(keyboards: ?*Keyboard) !void {
-    const fds: *std.c.pollfd = undefined;
-    var nfds: c_int = 0;
+fn loop(allocator: std.mem.Allocator, keyboards: ?*Keyboard) !void {
+    var nfds: usize = 0;
     var keyboard = keyboards;
     while (keyboard != null) {
         nfds += 1;
         keyboard = keyboard.?.next;
     }
-    std.debug.print("nfds - {d}", .{nfds});
-    _ = fds;
+    const fds: []std.c.pollfd = try allocator.alloc(std.c.pollfd, nfds);
+    defer allocator.free(fds);
+
+    keyboard = keyboards;
+    for (0..nfds) |i| {
+        fds[i].fd = @as(i32, @intCast(keyboard.?.fd));
+        fds[i].events = std.c.POLL.IN;
+        keyboard = keyboard.?.next;
+    }
+
+    while (true) {
+        var ret = std.c.poll(@as([*]std.c.pollfd, @ptrCast(fds)), nfds, -1);
+        if (ret < 0) {
+            std.log.err("ret - {any}\n", .{ret});
+            return;
+        }
+
+        keyboard = keyboards;
+        for (0..nfds) |i| {
+            if (fds[i].revents != 0) {
+                ret = read_keyboard(keyboard.?);
+                if (ret != 0) {
+                    return;
+                }
+            }
+            keyboard = keyboard.?.next;
+        }
+    }
+}
+
+fn read_keyboard(keyboard: *Keyboard) i32 {
+    var events: [16]input.input_event = undefined;
+
+    var len = std.c.read(keyboard.fd, @as([*]u8, @ptrCast(&events)), @sizeOf([16]input.input_event));
+    while (len > 0) {
+        const nevents: usize = @as(usize, @divTrunc(@as(usize, @intCast(len)), @as(usize, @sizeOf(input.input_event))));
+        for (0..nevents) |i| {
+            // process_event();
+            std.debug.print("{any}\n", .{events[i]});
+        }
+        len = std.c.read(keyboard.fd, @as([*]u8, @ptrCast(&events)), @sizeOf([16]input.input_event));
+    }
+
+    return 0;
 }
 
 pub fn main() !void {
@@ -157,5 +199,5 @@ pub fn main() !void {
     }
     defer free_keyboards(allocator, keyboards);
 
-    try loop(keyboards);
+    try loop(allocator, keyboards);
 }

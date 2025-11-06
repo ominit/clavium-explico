@@ -139,7 +139,7 @@ pub fn build(b: *std.Build) void {
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
-    const valgrind_run = b.addSystemCommand(&.{ "sudo", "valgrind", "--leak-check=full", "--error-exitcode=1" });
+    const valgrind_run = b.addSystemCommand(&.{ "valgrind", "--leak-check=full", "--error-exitcode=1" });
     valgrind_run.addArtifactArg(exe);
 
     // A top level step for running all tests. dependOn can be called multiple
