@@ -196,10 +196,12 @@ pub fn main() !void {
     std.debug.assert(context != null);
     defer xkb.xkb_context_unref(context);
 
-    // 2. Try to load a keymap (e.g., the default 'evdev' keymap)
+    // TODO make this not hardcoded
+    const keymap_names = xkb.xkb_rule_names{ .layout = "us", .model = null, .options = "caps:backspace", .rules = null, .variant = "colemak" };
+
     const keymap = xkb.xkb_keymap_new_from_names(
         context,
-        null,
+        &keymap_names,
         xkb.XKB_KEYMAP_COMPILE_NO_FLAGS,
     );
 
