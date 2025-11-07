@@ -1,4 +1,5 @@
 const std = @import("std");
+const sqlite = @import("sqlite");
 const evdev_logger = @import("evdev_logger");
 const xkb = @cImport({
     @cInclude("xkbcommon/xkbcommon.h");
@@ -13,10 +14,10 @@ const Keyboard = struct { path: []u8, fd: c_int, state: *xkb.xkb_state, next: ?*
 
 fn is_keyboard(fd: c_int) bool {
     var err: c_int = undefined;
-    const num_evbits = (((input.EV_CNT) + LONG_BIT - 1) / LONG_BIT);
-    const num_keybits = (((input.KEY_CNT) + LONG_BIT - 1) / LONG_BIT);
-    const evbits: [num_evbits]c_ulong = undefined;
-    const keybits: [num_keybits]c_ulong = undefined;
+    const num_evbits: comptime_int = comptime @divFloor(((input.EV_CNT) + LONG_BIT - 1), LONG_BIT);
+    const num_keybits: comptime_int = comptime @divFloor(((input.KEY_CNT) + LONG_BIT - 1), LONG_BIT);
+    var evbits: [num_evbits]c_ulong = undefined;
+    var keybits: [num_keybits]c_ulong = undefined;
 
     err = input.ioctl(fd, input.EVIOCGBIT(0, @sizeOf([num_evbits]c_ulong)), &evbits);
     if (err < 0) return false;
@@ -113,7 +114,7 @@ fn free_keyboards(allocator: std.mem.Allocator, keyboards: ?*Keyboard) void {
     }
 }
 
-fn loop(allocator: std.mem.Allocator, keyboards: ?*Keyboard) !void {
+fn loop(allocator: std.mem.Allocator, keyboards: ?*Keyboard, db: *sqlite.Db) !void {
     var nfds: usize = 0;
     var keyboard = keyboards;
     while (keyboard != null) {
@@ -140,7 +141,7 @@ fn loop(allocator: std.mem.Allocator, keyboards: ?*Keyboard) !void {
         keyboard = keyboards;
         for (0..nfds) |i| {
             if (fds[i].revents != 0) {
-                ret = try read_keyboard(allocator, keyboard.?);
+                ret = try read_keyboard(allocator, keyboard.?, db);
                 if (ret != 0) {
                     return;
                 }
@@ -150,14 +151,14 @@ fn loop(allocator: std.mem.Allocator, keyboards: ?*Keyboard) !void {
     }
 }
 
-fn read_keyboard(allocator: std.mem.Allocator, keyboard: *Keyboard) !i32 {
+fn read_keyboard(allocator: std.mem.Allocator, keyboard: *Keyboard, db: *sqlite.Db) !i32 {
     var events: [16]input.input_event = undefined;
 
     var len = std.c.read(keyboard.fd, @as([*]u8, @ptrCast(&events)), @sizeOf([16]input.input_event));
     while (len > 0) {
         const nevents: usize = @as(usize, @divTrunc(@as(usize, @intCast(len)), @as(usize, @sizeOf(input.input_event))));
         for (0..nevents) |i| {
-            try process_event(allocator, keyboard, events[i]);
+            try process_event(allocator, keyboard, events[i], db);
         }
         len = std.c.read(keyboard.fd, @as([*]u8, @ptrCast(&events)), @sizeOf([16]input.input_event));
     }
@@ -165,7 +166,7 @@ fn read_keyboard(allocator: std.mem.Allocator, keyboard: *Keyboard) !i32 {
     return 0;
 }
 
-fn process_event(allocator: std.mem.Allocator, keyboard: *Keyboard, event: input.input_event) !void {
+fn process_event(allocator: std.mem.Allocator, keyboard: *Keyboard, event: input.input_event, db: *sqlite.Db) !void {
     if (event.type != input.EV_KEY) return;
     const keycode = EVDEV_OFFSET + event.code;
     // const keymap = xkb.xkb_state_get_keymap(keyboard.state);
@@ -181,6 +182,14 @@ fn process_event(allocator: std.mem.Allocator, keyboard: *Keyboard, event: input
     defer allocator.free(buffer);
     _ = xkb.xkb_state_key_get_utf8(keyboard.state, keycode, buffer.ptr, buffer.len);
     std.debug.print("`{s}`\n", .{buffer});
+
+    const tv_sec: i64 = @as(i64, @intCast(event.time.tv_sec));
+    const tv_usec: i64 = @as(i64, @intCast(event.time.tv_usec));
+    const timestamp_ms: i64 = (tv_sec * 1000) + @divTrunc(tv_usec, 1000);
+
+    try db.exec("INSERT INTO key_events(key_symbol, timestamp_ms, event_state) VALUES(?, ?, ?)", .{}, .{ keysym_name, timestamp_ms, event.value });
+
+    _ = xkb.xkb_state_update_key(keyboard.state, keycode, @intCast(event.value));
 }
 
 pub fn main() !void {
@@ -218,5 +227,18 @@ pub fn main() !void {
     }
     defer free_keyboards(allocator, keyboards);
 
-    try loop(allocator, keyboards);
+    // TODO make path argument
+    var db = try sqlite.Db.init(.{ .mode = sqlite.Db.Mode{ .File = "/home/ominit/keys.db" }, .open_flags = .{ .create = true, .write = true }, .threading_mode = .MultiThread });
+    defer db.deinit();
+
+    try db.exec(
+        \\CREATE TABLE IF NOT EXISTS key_events(
+        \\id INTEGER PRIMARY KEY,
+        \\key_symbol TEXT NOT NULL,
+        \\timestamp_ms INTEGER NOT NULL,
+        \\event_state INTEGER NOT NULL
+        \\)
+    , .{}, .{});
+
+    try loop(allocator, keyboards, &db);
 }

@@ -26,7 +26,9 @@
           zig
           libxkbcommon
           libinput
+          sqlite
           valgrind
+          gdb
 
           # nix
           nixd
