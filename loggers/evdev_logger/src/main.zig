@@ -140,7 +140,7 @@ fn loop(allocator: std.mem.Allocator, keyboards: ?*Keyboard) !void {
         keyboard = keyboards;
         for (0..nfds) |i| {
             if (fds[i].revents != 0) {
-                ret = read_keyboard(keyboard.?);
+                ret = try read_keyboard(allocator, keyboard.?);
                 if (ret != 0) {
                     return;
                 }
@@ -150,20 +150,37 @@ fn loop(allocator: std.mem.Allocator, keyboards: ?*Keyboard) !void {
     }
 }
 
-fn read_keyboard(keyboard: *Keyboard) i32 {
+fn read_keyboard(allocator: std.mem.Allocator, keyboard: *Keyboard) !i32 {
     var events: [16]input.input_event = undefined;
 
     var len = std.c.read(keyboard.fd, @as([*]u8, @ptrCast(&events)), @sizeOf([16]input.input_event));
     while (len > 0) {
         const nevents: usize = @as(usize, @divTrunc(@as(usize, @intCast(len)), @as(usize, @sizeOf(input.input_event))));
         for (0..nevents) |i| {
-            // process_event();
-            std.debug.print("{any}\n", .{events[i]});
+            try process_event(allocator, keyboard, events[i]);
         }
         len = std.c.read(keyboard.fd, @as([*]u8, @ptrCast(&events)), @sizeOf([16]input.input_event));
     }
 
     return 0;
+}
+
+fn process_event(allocator: std.mem.Allocator, keyboard: *Keyboard, event: input.input_event) !void {
+    if (event.type != input.EV_KEY) return;
+    const keycode = EVDEV_OFFSET + event.code;
+    // const keymap = xkb.xkb_state_get_keymap(keyboard.state);
+
+    const keysym = xkb.xkb_state_key_get_one_sym(keyboard.state, keycode);
+    const keysym_name_size = std.math.cast(usize, xkb.xkb_keysym_get_name(keysym, null, 0) + 1).?;
+    const keysym_name = try allocator.alloc(u8, keysym_name_size);
+    defer allocator.free(keysym_name);
+    _ = std.math.cast(usize, xkb.xkb_keysym_get_name(keysym, keysym_name.ptr, keysym_name.len) + 1).?;
+    std.debug.print("`{s}`\n", .{keysym_name});
+    const utf8_size = std.math.cast(usize, xkb.xkb_state_key_get_utf8(keyboard.state, keycode, null, 0) + 1).?;
+    const buffer = try allocator.alloc(u8, utf8_size);
+    defer allocator.free(buffer);
+    _ = xkb.xkb_state_key_get_utf8(keyboard.state, keycode, buffer.ptr, buffer.len);
+    std.debug.print("`{s}`\n", .{buffer});
 }
 
 pub fn main() !void {
