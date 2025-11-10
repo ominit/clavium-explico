@@ -24,6 +24,7 @@
           # zig
           zls
           zig
+          zon2nix
           libxkbcommon
           libinput
           sqlite

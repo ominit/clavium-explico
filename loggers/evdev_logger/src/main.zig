@@ -253,6 +253,7 @@ var config = struct {
 }{};
 
 pub fn main() !void {
+    defer _ = gpa.deinit();
     var r = try cli.AppRunner.init(allocator);
     const app = cli.App{ .command = cli.Command{ .name = "ce_evdev_logger", .options = try r.allocOptions(&.{ cli.Option{ .long_name = "db-path", .required = true, .help = "Where the sqlite database should be created (required)", .value_ref = r.mkRef(&config.db_path) }, cli.Option{ .long_name = "kb-layout", .required = false, .help = "Keyboard layout", .value_ref = r.mkRef(&config.kb_layout) }, cli.Option{ .long_name = "kb-model", .required = false, .help = "Keyboard model", .value_ref = r.mkRef(&config.kb_model) }, cli.Option{ .long_name = "kb-options", .required = false, .help = "Keyboard options", .value_ref = r.mkRef(&config.kb_options) }, cli.Option{ .long_name = "kb-rules", .required = false, .help = "Keyboard rules", .value_ref = r.mkRef(&config.kb_rules) }, cli.Option{ .long_name = "kb-variant", .required = false, .help = "Keyboard variant", .value_ref = r.mkRef(&config.kb_variant) } }), .target = cli.CommandTarget{ .action = cli.CommandAction{ .exec = run } } } };
     defer allocator.free(config.db_path);
@@ -261,6 +262,5 @@ pub fn main() !void {
     defer allocator.free(config.kb_options);
     defer allocator.free(config.kb_rules);
     defer allocator.free(config.kb_variant);
-    defer _ = gpa.deinit();
     return r.run(&app);
 }
