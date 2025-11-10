@@ -8,6 +8,10 @@ const xkb = @cImport({
 const input = @cImport({
     @cInclude("linux/input.h");
 });
+
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator = gpa.allocator();
+
 const LONG_BIT = @sizeOf(c_ulong) * 8;
 const EVDEV_OFFSET = 8;
 
@@ -43,9 +47,8 @@ fn evdev_bit_is_set(array: []const c_ulong, bit: usize) bool {
     return (val & mask) != 0;
 }
 
-fn keyboard_new(allocator: std.mem.Allocator, entry: []const u8, keymap: *xkb.xkb_keymap, out: *?*Keyboard) !c_int {
+fn keyboard_new(entry: []const u8, keymap: *xkb.xkb_keymap, out: *?*Keyboard) !c_int {
     const path = try std.mem.concat(allocator, u8, &[_][]const u8{ "/dev/input/", entry });
-    // defer allocator.free(path);
     const pathz = try std.mem.Allocator.dupeZ(allocator, u8, path);
     defer allocator.free(pathz);
 
@@ -75,7 +78,7 @@ fn keyboard_new(allocator: std.mem.Allocator, entry: []const u8, keymap: *xkb.xk
     return 0;
 }
 
-fn get_keyboards(allocator: std.mem.Allocator, keymap: *xkb.xkb_keymap) !?*Keyboard {
+fn get_keyboards(keymap: *xkb.xkb_keymap) !?*Keyboard {
     var keyboards: ?*Keyboard = null;
     var keyboard: ?*Keyboard = null;
     var dir = try std.fs.openDirAbsolute("/dev/input", .{ .iterate = true });
@@ -84,7 +87,7 @@ fn get_keyboards(allocator: std.mem.Allocator, keymap: *xkb.xkb_keymap) !?*Keybo
     var iter = dir.iterate();
     while (try iter.next()) |entry| {
         if (!std.mem.startsWith(u8, entry.name, "event")) continue;
-        const ret = try keyboard_new(allocator, entry.name, keymap, &keyboard);
+        const ret = try keyboard_new(entry.name, keymap, &keyboard);
         if (ret != 0) {
             continue;
         }
@@ -103,7 +106,7 @@ fn get_keyboards(allocator: std.mem.Allocator, keymap: *xkb.xkb_keymap) !?*Keybo
     return keyboards;
 }
 
-fn free_keyboards(allocator: std.mem.Allocator, keyboards: ?*Keyboard) void {
+fn free_keyboards(keyboards: ?*Keyboard) void {
     var current = keyboards;
     while (current) |keyboard| {
         xkb.xkb_state_unref(keyboard.state);
@@ -115,7 +118,7 @@ fn free_keyboards(allocator: std.mem.Allocator, keyboards: ?*Keyboard) void {
     }
 }
 
-fn loop(allocator: std.mem.Allocator, keyboards: ?*Keyboard, db: *sqlite.Db) !void {
+fn loop(keyboards: ?*Keyboard, db: *sqlite.Db) !void {
     var nfds: usize = 0;
     var keyboard = keyboards;
     while (keyboard != null) {
@@ -142,7 +145,7 @@ fn loop(allocator: std.mem.Allocator, keyboards: ?*Keyboard, db: *sqlite.Db) !vo
         keyboard = keyboards;
         for (0..nfds) |i| {
             if (fds[i].revents != 0) {
-                ret = try read_keyboard(allocator, keyboard.?, db);
+                ret = try read_keyboard(keyboard.?, db);
                 if (ret != 0) {
                     return;
                 }
@@ -152,14 +155,14 @@ fn loop(allocator: std.mem.Allocator, keyboards: ?*Keyboard, db: *sqlite.Db) !vo
     }
 }
 
-fn read_keyboard(allocator: std.mem.Allocator, keyboard: *Keyboard, db: *sqlite.Db) !i32 {
+fn read_keyboard(keyboard: *Keyboard, db: *sqlite.Db) !i32 {
     var events: [16]input.input_event = undefined;
 
     var len = std.c.read(keyboard.fd, @as([*]u8, @ptrCast(&events)), @sizeOf([16]input.input_event));
     while (len > 0) {
         const nevents: usize = @as(usize, @divTrunc(@as(usize, @intCast(len)), @as(usize, @sizeOf(input.input_event))));
         for (0..nevents) |i| {
-            try process_event(allocator, keyboard, events[i], db);
+            try process_event(keyboard, events[i], db);
         }
         len = std.c.read(keyboard.fd, @as([*]u8, @ptrCast(&events)), @sizeOf([16]input.input_event));
     }
@@ -167,10 +170,9 @@ fn read_keyboard(allocator: std.mem.Allocator, keyboard: *Keyboard, db: *sqlite.
     return 0;
 }
 
-fn process_event(allocator: std.mem.Allocator, keyboard: *Keyboard, event: input.input_event, db: *sqlite.Db) !void {
+fn process_event(keyboard: *Keyboard, event: input.input_event, db: *sqlite.Db) !void {
     if (event.type != input.EV_KEY) return;
     const keycode = EVDEV_OFFSET + event.code;
-    // const keymap = xkb.xkb_state_get_keymap(keyboard.state);
 
     const keysym = xkb.xkb_state_key_get_one_sym(keyboard.state, keycode);
     const keysym_name_size = std.math.cast(usize, xkb.xkb_keysym_get_name(keysym, null, 0) + 1).?;
@@ -194,9 +196,6 @@ fn process_event(allocator: std.mem.Allocator, keyboard: *Keyboard, event: input
 }
 
 fn run() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
     const context = xkb.xkb_context_new(xkb.XKB_CONTEXT_NO_FLAGS);
     if (context == null) {
         std.log.err("Failed to create xkbcommon context", .{});
@@ -205,8 +204,7 @@ fn run() !void {
     std.debug.assert(context != null);
     defer xkb.xkb_context_unref(context);
 
-    // TODO make this not hardcoded
-    const keymap_names = xkb.xkb_rule_names{ .layout = "us", .model = null, .options = "caps:backspace", .rules = null, .variant = "colemak" };
+    const keymap_names = xkb.xkb_rule_names{ .layout = config.kb_layout.ptr, .model = config.kb_model.ptr, .options = config.kb_options.ptr, .rules = config.kb_rules.ptr, .variant = config.kb_variant.ptr };
 
     const keymap = xkb.xkb_keymap_new_from_names(
         context,
@@ -221,11 +219,11 @@ fn run() !void {
     std.debug.assert(keymap != null);
     defer xkb.xkb_keymap_unref(keymap);
 
-    const keyboards = try get_keyboards(allocator, keymap.?);
+    const keyboards = try get_keyboards(keymap.?);
     if (keyboards == null) {
         return;
     }
-    defer free_keyboards(allocator, keyboards);
+    defer free_keyboards(keyboards);
 
     const db_pathz = try std.mem.Allocator.dupeZ(allocator, u8, config.db_path);
     defer allocator.free(db_pathz);
@@ -242,16 +240,27 @@ fn run() !void {
         \\)
     , .{}, .{});
 
-    try loop(allocator, keyboards, &db);
+    try loop(keyboards, &db);
 }
 
 var config = struct {
     db_path: []const u8 = undefined,
+    kb_layout: []const u8 = "",
+    kb_model: []const u8 = "",
+    kb_options: []const u8 = "",
+    kb_rules: []const u8 = "",
+    kb_variant: []const u8 = "",
 }{};
 
 pub fn main() !void {
-    var r = try cli.AppRunner.init(std.heap.page_allocator);
-    const app = cli.App{ .command = cli.Command{ .name = "ce_evdev_logger", .options = try r.allocOptions(&.{cli.Option{ .long_name = "db-path", .required = true, .help = "Where the sqlite database should be created", .value_ref = r.mkRef(&config.db_path) }}), .target = cli.CommandTarget{ .action = cli.CommandAction{ .exec = run } } } };
-    defer std.heap.page_allocator.free(config.db_path);
+    var r = try cli.AppRunner.init(allocator);
+    const app = cli.App{ .command = cli.Command{ .name = "ce_evdev_logger", .options = try r.allocOptions(&.{ cli.Option{ .long_name = "db-path", .required = true, .help = "Where the sqlite database should be created (required)", .value_ref = r.mkRef(&config.db_path) }, cli.Option{ .long_name = "kb-layout", .required = false, .help = "Keyboard layout", .value_ref = r.mkRef(&config.kb_layout) }, cli.Option{ .long_name = "kb-model", .required = false, .help = "Keyboard model", .value_ref = r.mkRef(&config.kb_model) }, cli.Option{ .long_name = "kb-options", .required = false, .help = "Keyboard options", .value_ref = r.mkRef(&config.kb_options) }, cli.Option{ .long_name = "kb-rules", .required = false, .help = "Keyboard rules", .value_ref = r.mkRef(&config.kb_rules) }, cli.Option{ .long_name = "kb-variant", .required = false, .help = "Keyboard variant", .value_ref = r.mkRef(&config.kb_variant) } }), .target = cli.CommandTarget{ .action = cli.CommandAction{ .exec = run } } } };
+    defer allocator.free(config.db_path);
+    defer allocator.free(config.kb_layout);
+    defer allocator.free(config.kb_model);
+    defer allocator.free(config.kb_options);
+    defer allocator.free(config.kb_rules);
+    defer allocator.free(config.kb_variant);
+    defer _ = gpa.deinit();
     return r.run(&app);
 }
