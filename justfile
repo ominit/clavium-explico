@@ -15,7 +15,7 @@ build-zig:
 build-all: build-zig
 
 run-evdev-logger: build-zig
-    sudo ./loggers/evdev_logger/zig-out/bin/evdev_logger
+    sudo ./loggers/evdev_logger/zig-out/bin/evdev_logger --db-path test.db
 
 # Get the current system (e.g., "x86_64-linux", "aarch64-linux")
 

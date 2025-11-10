@@ -21,6 +21,9 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("sqlite3", .{});
     exe.root_module.addImport("sqlite", sqlite.module("sqlite"));
 
+    const cli = b.dependency("cli", .{ .target = target, .optimize = optimize });
+    exe.root_module.addImport("cli", cli.module("cli"));
+
     const run_step = b.step("run", "Run the app");
 
     const run_cmd = b.addRunArtifact(exe);

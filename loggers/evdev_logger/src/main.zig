@@ -1,5 +1,6 @@
 const std = @import("std");
 const sqlite = @import("sqlite");
+const cli = @import("cli");
 const evdev_logger = @import("evdev_logger");
 const xkb = @cImport({
     @cInclude("xkbcommon/xkbcommon.h");
@@ -192,11 +193,10 @@ fn process_event(allocator: std.mem.Allocator, keyboard: *Keyboard, event: input
     _ = xkb.xkb_state_update_key(keyboard.state, keycode, @intCast(event.value));
 }
 
-pub fn main() !void {
+fn run() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-
     const context = xkb.xkb_context_new(xkb.XKB_CONTEXT_NO_FLAGS);
     if (context == null) {
         std.log.err("Failed to create xkbcommon context", .{});
@@ -227,8 +227,10 @@ pub fn main() !void {
     }
     defer free_keyboards(allocator, keyboards);
 
-    // TODO make path argument
-    var db = try sqlite.Db.init(.{ .mode = sqlite.Db.Mode{ .File = "/home/ominit/keys.db" }, .open_flags = .{ .create = true, .write = true }, .threading_mode = .MultiThread });
+    const db_pathz = try std.mem.Allocator.dupeZ(allocator, u8, config.db_path);
+    defer allocator.free(db_pathz);
+
+    var db = try sqlite.Db.init(.{ .mode = sqlite.Db.Mode{ .File = db_pathz }, .open_flags = .{ .create = true, .write = true }, .threading_mode = .MultiThread });
     defer db.deinit();
 
     try db.exec(
@@ -241,4 +243,15 @@ pub fn main() !void {
     , .{}, .{});
 
     try loop(allocator, keyboards, &db);
+}
+
+var config = struct {
+    db_path: []const u8 = undefined,
+}{};
+
+pub fn main() !void {
+    var r = try cli.AppRunner.init(std.heap.page_allocator);
+    const app = cli.App{ .command = cli.Command{ .name = "ce_evdev_logger", .options = try r.allocOptions(&.{cli.Option{ .long_name = "db-path", .required = true, .help = "Where the sqlite database should be created", .value_ref = r.mkRef(&config.db_path) }}), .target = cli.CommandTarget{ .action = cli.CommandAction{ .exec = run } } } };
+    defer std.heap.page_allocator.free(config.db_path);
+    return r.run(&app);
 }
