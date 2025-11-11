@@ -2,7 +2,7 @@ help:
     @just --list
 
 clean:
-    rm -rf loggers/evdev_logger/.zig-cache loggers/evdev_logger/zig-out
+    rm -rf loggers/evdev_logger/.zig-cache loggers/evdev_logger/zig-out test.db test.db-journal
 
 test-zig:
     cd loggers/evdev_logger && zig build test -Doptimize=ReleaseSafe

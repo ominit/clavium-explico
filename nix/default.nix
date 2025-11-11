@@ -1,7 +1,8 @@
 {
   imports = [
-    ./package.nix
+    ./modules.nix
     ./devshell.nix
     ./treefmt.nix
+    ./packages.nix
   ];
 }

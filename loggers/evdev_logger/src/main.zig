@@ -179,12 +179,10 @@ fn process_event(keyboard: *Keyboard, event: input.input_event, db: *sqlite.Db) 
     const keysym_name = try allocator.alloc(u8, keysym_name_size);
     defer allocator.free(keysym_name);
     _ = std.math.cast(usize, xkb.xkb_keysym_get_name(keysym, keysym_name.ptr, keysym_name.len) + 1).?;
-    std.debug.print("`{s}`\n", .{keysym_name});
     const utf8_size = std.math.cast(usize, xkb.xkb_state_key_get_utf8(keyboard.state, keycode, null, 0) + 1).?;
     const buffer = try allocator.alloc(u8, utf8_size);
     defer allocator.free(buffer);
     _ = xkb.xkb_state_key_get_utf8(keyboard.state, keycode, buffer.ptr, buffer.len);
-    std.debug.print("`{s}`\n", .{buffer});
 
     const tv_sec: i64 = @as(i64, @intCast(event.time.tv_sec));
     const tv_usec: i64 = @as(i64, @intCast(event.time.tv_usec));
@@ -255,7 +253,7 @@ var config = struct {
 pub fn main() !void {
     defer _ = gpa.deinit();
     var r = try cli.AppRunner.init(allocator);
-    const app = cli.App{ .command = cli.Command{ .name = "ce_evdev_logger", .options = try r.allocOptions(&.{ cli.Option{ .long_name = "db-path", .required = true, .help = "Where the sqlite database should be created (required)", .value_ref = r.mkRef(&config.db_path) }, cli.Option{ .long_name = "kb-layout", .required = false, .help = "Keyboard layout", .value_ref = r.mkRef(&config.kb_layout) }, cli.Option{ .long_name = "kb-model", .required = false, .help = "Keyboard model", .value_ref = r.mkRef(&config.kb_model) }, cli.Option{ .long_name = "kb-options", .required = false, .help = "Keyboard options", .value_ref = r.mkRef(&config.kb_options) }, cli.Option{ .long_name = "kb-rules", .required = false, .help = "Keyboard rules", .value_ref = r.mkRef(&config.kb_rules) }, cli.Option{ .long_name = "kb-variant", .required = false, .help = "Keyboard variant", .value_ref = r.mkRef(&config.kb_variant) } }), .target = cli.CommandTarget{ .action = cli.CommandAction{ .exec = run } } } };
+    const app = cli.App{ .command = cli.Command{ .name = "ce-evdev-logger", .options = try r.allocOptions(&.{ cli.Option{ .long_name = "db-path", .required = true, .help = "Where the sqlite database should be created (required)", .value_ref = r.mkRef(&config.db_path) }, cli.Option{ .long_name = "kb-layout", .required = false, .help = "Keyboard layout", .value_ref = r.mkRef(&config.kb_layout) }, cli.Option{ .long_name = "kb-model", .required = false, .help = "Keyboard model", .value_ref = r.mkRef(&config.kb_model) }, cli.Option{ .long_name = "kb-options", .required = false, .help = "Keyboard options", .value_ref = r.mkRef(&config.kb_options) }, cli.Option{ .long_name = "kb-rules", .required = false, .help = "Keyboard rules", .value_ref = r.mkRef(&config.kb_rules) }, cli.Option{ .long_name = "kb-variant", .required = false, .help = "Keyboard variant", .value_ref = r.mkRef(&config.kb_variant) } }), .target = cli.CommandTarget{ .action = cli.CommandAction{ .exec = run } } } };
     defer allocator.free(config.db_path);
     defer allocator.free(config.kb_layout);
     defer allocator.free(config.kb_model);

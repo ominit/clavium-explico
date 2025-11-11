@@ -8,7 +8,7 @@
       nativeBuildInputs = with pkgs; [zig.hook sqlite libxkbcommon libinput];
 
       postPatch = ''
-        ln -s ${pkgs.callPackage ./deps.nix {}} $ZIG_GLOBAL_CACHE_DIR/p
+        ln -s ${pkgs.callPackage ./evdev-logger-deps.nix {}} $ZIG_GLOBAL_CACHE_DIR/p
       '';
 
       dontUseZigInstall = true;
