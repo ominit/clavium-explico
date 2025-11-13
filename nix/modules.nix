@@ -104,37 +104,41 @@
           User = "ce-evdev-logger";
           Group = "ce-evdev-logger";
 
-          # Security Hardening
-          # Umask = "0007";
+          # Deny
           PrivateTmp = true;
-          # ProtectSystem = "strict";
+          NoNewPrivileges = true;
           ProtectKernelModules = true;
           ProtectKernelTunables = true;
-          LockPersonality = true;
-          MemoryDenyWriteExecute = true;
-          # SystemCallArchitecture = "native";
-          RestrictNamespaces = true;
+          ProtectControlGroups = true;
+          RestrictSUIDSGID = true;
           RemoveIPC = true;
           PrivateUsers = true;
-          # IPAddressDeny = true;
-          ProtectProc = "noaccess";
-          # BindReadOnlyPaths = ["/dev/input" "/nix/store"];
-          SupplementaryGroups = "${builtins.toString config.users.groups.input.gid}";
-          # RestrictAccessFamilies = "AF_UNIX";
-          ProtectHome = true;
           ProtectHostname = true;
           RestrictRealtime = true;
           PrivateNetwork = true;
           CapabilityBoundingSet = "";
-          NoNewPrivileges = true;
-          RestrictSUIDSGID = true;
-          # SystemCallFilter = "@system-service";
-          ProtectKernelLogs = true;
-          ProtectControlGroups = true;
+          ProtectHome = true;
+          LockPersonality = true;
           ProtectClock = true;
+          ProtectKernelLogs = true;
+          MemoryDenyWriteExecute = true;
+          RestrictNamespaces = true;
+          RestrictAddressFamilies = "none";
+          IPAddressDeny = "any";
+          SystemCallArchitectures = "native";
+          ProcSubset = "pid";
+          ProtectSystem = "strict";
+          ProtectProc = "noaccess";
+
+          # Allow
+          UMask = "007";
+          SystemCallFilter = "@aio @basic-io @default @file-system @io-event @memlock @process @signal @sync readdir splice ioctl";
+          ReadWritePaths = "${builtins.dirOf cfg.dbPath}";
+
           # DeviceAllow = "/dev/input/event* r";
+          # SupplementaryGroups = "${builtins.toString config.users.groups.input.gid}";
+          # BindReadOnlyPaths = ["/dev/input" "/nix/store"];
           # ReadOnlyPaths = "/dev/input";
-          # ReadWritePaths = "${builtins.dirOf cfg.dbPath}";
           # DevicePolicy = "closed";
           # PrivateDevices = false;
         };
