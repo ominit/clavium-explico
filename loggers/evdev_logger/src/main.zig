@@ -179,16 +179,12 @@ fn process_event(keyboard: *Keyboard, event: input.input_event, db: *sqlite.Db) 
     const keysym_name = try allocator.alloc(u8, keysym_name_size);
     defer allocator.free(keysym_name);
     _ = std.math.cast(usize, xkb.xkb_keysym_get_name(keysym, keysym_name.ptr, keysym_name.len) + 1).?;
-    const utf8_size = std.math.cast(usize, xkb.xkb_state_key_get_utf8(keyboard.state, keycode, null, 0) + 1).?;
-    const buffer = try allocator.alloc(u8, utf8_size);
-    defer allocator.free(buffer);
-    _ = xkb.xkb_state_key_get_utf8(keyboard.state, keycode, buffer.ptr, buffer.len);
 
     const tv_sec: i64 = @as(i64, @intCast(event.time.tv_sec));
     const tv_usec: i64 = @as(i64, @intCast(event.time.tv_usec));
     const timestamp_ms: i64 = (tv_sec * 1000) + @divTrunc(tv_usec, 1000);
 
-    try db.exec("INSERT INTO key_events(key_symbol, timestamp_ms, event_state) VALUES(?, ?, ?)", .{}, .{ keysym_name, timestamp_ms, event.value });
+    try db.exec("INSERT INTO key_events(key_symbol, timestamp_ms, event_state) VALUES(?, ?, ?)", .{}, .{ keysym_name[0 .. keysym_name_size - 1], timestamp_ms, event.value });
 
     _ = xkb.xkb_state_update_key(keyboard.state, keycode, @intCast(event.value));
 }
